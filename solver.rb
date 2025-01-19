@@ -40,13 +40,6 @@ class Solver
       g = possibilities.find { |p| p.last.size == lowest_num_of_possibilities }
       possible_guesses = g.last.map { |num| { :cells => [g.first], :number => num } }
 
-      #puts('Intermediate result')
-      #puts(field_str)
-      #puts('Intermediate statements')
-      #puts(@statements)
-      #puts('possible guesses')
-      #puts(possible_guesses)
-
       possible_guesses.each do |guess|
         puts "#{' ' * @depth}Depth #{@depth}: Guessing #{guess}"
         begin
@@ -107,7 +100,7 @@ class Solver
   def field
     field = (1..9).map { |row| %w[A B C D E F G H I].map { |col| "#{col}#{row}"}}
                   .flatten
-                  .map { |f| [f, @statements.select { |s| s[:cells].include?(f) }.map { |s| s[:number] }.uniq]}
+                  .map { |c| [c, @statements.select { |s| s[:cells].include?(c) }.map { |s| s[:number] }.uniq]}
     # TODO: nicer representation as hash instead of first/last
     return field
   end
@@ -164,18 +157,13 @@ class Solver
 
   def solve_linear
     while true
-      while true
-        fingerprint = statement_hash
-        reduce_statements_by_containment
-        reduce_statements_by_single_numbers
-        break if fingerprint == statement_hash
-
-        raise "Linear steps lead to invalid solution." unless correct?
-      end
-
       fingerprint = statement_hash
-      #reduce_statements_by_closed_groups
+      reduce_statements_by_containment
+      reduce_statements_by_closed_groups
+      reduce_statements_by_single_numbers
       break if fingerprint == statement_hash
+
+      raise "Linear steps lead to invalid solution." unless correct?
     end
   end
 
@@ -186,14 +174,14 @@ class Solver
 
       # Contained means: needle has same number and cells is included in statement's cells
       contained_statements = @statements.select { |s| s[:number] == needle[:number] }
-                                        .select { |s| needle[:cells].all? { |f| s[:cells].include?(f) } }
+                                        .select { |s| needle[:cells].all? { |c| s[:cells].include?(c) } }
                                         .reject { |s| s == needle }
 
       # 0. If unique: Delete the cell from all other @statements' cells
       if needle[:cells].size == 1
         @statements.select { |s| s[:cells].include?(needle[:cells].first) }
                     .reject { |s| s == needle }
-                    .each { |s| s[:cells].reject! { |f| f == needle[:cells].first } }
+                    .each { |s| s[:cells].reject! { |c| c == needle[:cells].first } }
       end
 
       # If needle is contained in a statement:
@@ -201,13 +189,13 @@ class Solver
 
       # 1. For this number, remove all cells in other statements
       contained_statements.each do |cs|
-        cells_to_remove = cs[:cells].reject { |f| needle[:cells].include?(f) }
+        cells_to_remove = cs[:cells].reject { |c| needle[:cells].include?(c) }
         @statements.select { |s| s[:number] == cs[:number] }
                    .reject { |s| s == cs }
                    .reject { |s| s == needle }
                    .reject { |s| s[:cells].size == 1 }
                    .each { |s|
-                      s[:cells].reject! { |f| cells_to_remove.include?(f) }
+                      s[:cells].reject! { |c| cells_to_remove.include?(c) }
                 }
       end
 
@@ -234,32 +222,22 @@ class Solver
     @statements.uniq!
   end
 
-  # WIP
   def reduce_statements_by_closed_groups
-    # Closed group handling
     groups = []
     @statements.each do |statement|
       group = @statements.select{ |s| s[:cells] == statement[:cells] }
       next if group.nil? || group.size <= 1 || group.map { |s| s[:number] }.uniq.size != group[0][:cells].size
 
-      groups << { :cells => group[0][:cells], :numbers => group.map{ |g| g[:number]} }
+      groups << { :cells => group[0][:cells].map{ |c| c.dup }, :numbers => group.map{ |g| g[:number]} }
     end
-    puts("GROUPS")
-    groups.uniq!
+
+    # Remove group cells from statements which target another number than the group numbers
     groups.each do |group|
-      puts('group')
-      puts(group)
-    end
-    groups.each do |group|
-      cells_to_remove = group[:cells]
-      group[:numbers].each do |number|
-        @statements.select { |s| s[:number] == number }
-                   .reject { |s| s[:cells] == group[:cells] }
-                   .each { |s|
-                     puts "Removing #{cells_to_remove} because of group #{group} from #{s}"
-                     s[:cells].reject! { |f| cells_to_remove.include?(f) }
-                }
-      end
+      @statements.select { |s| !group[:numbers].include?(s[:number]) }
+                 .reject { |s| s[:cells] == group[:cells] }
+                 .each do |s|
+                   s[:cells].reject! { |c| group[:cells].include?(c) }
+                 end
     end
 
     # Clean up all statements that are empty after the previous step
